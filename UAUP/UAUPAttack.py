@@ -47,6 +47,7 @@ class RepeatAdvPatch_Attack():
         self.mml_weight, self.dl_weight = mml_weight, dl_weight
 
         # path process
+        self.data_root = data_root
         self.savedir = savedir
         if os.path.exists(self.savedir) == False:
             os.makedirs(self.savedir)
@@ -183,58 +184,70 @@ class RepeatAdvPatch_Attack():
             if t != 0 and t % 10 == 0:
                 self.evauate_test_path(t)
 
-    def evaluate_db_draw(self, adv_images, path, t):
-        adv_images_cuda = self.list_to_cuda(adv_images, device)
-        db_results = []
-        for img in adv_images_cuda:
+    def evaluate_and_draw(self, adv_patch,image_root,gt_root,save_path,resize_ratio=0,is_resize=False):
+        image_names = [os.path.join(image_root, name) for name in os.listdir(image_root)]
+        images = [img_read(os.path.join(image_root, name)) for name in os.listdir(image_root)]
+        test_gts = [os.path.join(gt_root, name) for name in os.listdir(gt_root)]
+        results=[]#PRF
+        for img,name,gt in zip(images,image_names,test_gts):
+            h,w=img.shape[2:]
+            UAU=repeat_4D(adv_patch.clone().detach(),h,w)
+            mask_t=extract_background(img)
+            merge_image=img*(1-mask_t)+mask_t*UAU
+            merge_image=merge_image.to(GConfig.DB_device)
+            if is_resize:
+                merge_image=random_image_resize(merge_image,low=resize_ratio,high=resize_ratio)
             with torch.no_grad():
-                img = [tensor2np(img)]
-                boxes, feamap = self.ocr.output(img,
-                                               output='./', export='./',
-                                               feaName=["neck.lateral_convs.0","neck.lateral_convs.1",
-                                                        "neck.lateral_convs.2","neck.lateral_convs.3",
-                                                        "bbox_head.binarize.7"])
-                preds = feamap[-1]
-
-            db_results.append(preds)
-        hw_lists = get_image_hw(adv_images)
-        i = 0
-        save_name = "DB_{}_{}.jpg"
-        for adv_image, pred, [h, w] in zip(adv_images, db_results, hw_lists):
-            _, boxes = get_DB_dilateds_boxes(pred, h, w)
-            adv_image_cv2 = img_tensortocv2(adv_image)
-            DB_draw_box(adv_image_cv2, boxes=boxes, save_path=os.path.join(path, save_name.format(epoch, i)))
-            i += 1
-        P=1.0
-        R=1.0
-        F=1.0
+                pred = self.DBmodel(merge_image)[0]
+            gt=read_txt(gt)
+            results.append(self.evaluator.evaluate_image(gt,pred))
+            #draw
+            cv2_img=cv2.imread(name)
+            save_path=os.path.join(save_path,name)
+            Draw_box(cv2_img,results,save_path)
+        P, R, F = self.evaluator.combine_results(results)
         return P,R,F
 
     def evauate_test_path(self, t):
-        save_dir_db = os.path.join(self.savedir, "eval", "orgin")
-        if os.path.exists(save_dir_db) == False:
-            os.makedirs(save_dir_db)
-        save_resize_dir = os.path.join(self.savedir, "eval", "resize",str(t))
-        if os.path.exists(save_resize_dir) == False:
-            os.makedirs(save_resize_dir)
 
-        resize_scales = [item / 10 for item in range(6, 21, 1)]
+        #=================original=====================
+        #savedir
+            #t
+                #original
+                #60
+                #....
+                #200
+        o_img_root=os.path.join(self.data_root,'test')
+        o_gt_root = os.path.join(self.data_root, 'test_gt')
+        o_save_dir = os.path.join(self.savedir, str(t),'original')
+        if os.path.exists(o_save_dir) == False:
+            os.makedirs(o_save_dir)
+        P,R,F=self.evaluate_and_draw(self.adv_patch,o_img_root,o_gt_root,o_save_dir)
+        e="iter:{},original:--P:{},--R:{},--F:{}".format(t,P,R,F)
+        self.logger.info(e)
 
-        hw_s = get_image_hw(self.test_images)
-        mask_s = self.get_image_backgroud_mask(self.test_images)
-        adv_images = self.get_merge_image_list(self.adv_patch.clone().detach().cpu(),
-                                               mask_s, self.test_images, hw_s)
-        self.evaluate_db_draw(adv_images=adv_images, path=save_dir_db, t=t)
-        resize_adv_images = get_random_resize_image(adv_image_lists=adv_images, low=0.4, high=3)
-        for re_sclae in resize_scales:
-            P,R,F=self.evaluate_db_draw(resize_adv_images,os.path.join(save_resize_dir,str(re_sclae)),t)
-            e="iter:{},scale:{},"
-            self.logger.info()
-        del (resize_adv_images, adv_images, hw_s, mask_s)
+        #=================scale=====================
+        #data_root
+            #test_resize
+            #test_resize_gt
+                #60
+                #...
+                #200
+        resize_scales = [item / 10 for item in range(6, 21, 1)]#0.6 0.7 0.8 ... 2.0
+        for item in resize_scales:
+            str_s=str(int(item * 100))
+            r_img_root=os.path.join(self.data_root,'test_resize')
+            r_gt_root = os.path.join(self.data_root, 'test_resize_gt',str_s)
+            r_save_dir = os.path.join(self.savedir, str(t), str_s)
+            if os.path.exists(r_save_dir) == False:
+                os.makedirs(r_save_dir)
+            P,R,F=self.evaluate_and_draw(self.adv_patch,r_img_root,r_gt_root,r_save_dir)
+            e="iter:{},scale_ratio:{},P:{},R:{},F:{}".format(t,item,P,R,F)
+            self.logger.info(e)
 
 
-def tensor2np(img):
-    return np.array(255*img.transpose(0,1).transpose(1,2),dtype=np.uint8)
+# def tensor2np(img):
+#     return np.array(255*img.transpose(0,1).transpose(1,2),dtype=np.uint8)
 
 if __name__ == '__main__':
     RAT = RepeatAdvPatch_Attack(data_root="../AllData/Data",
