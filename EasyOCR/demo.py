@@ -19,14 +19,14 @@ def write_res(file_path,res):
     return
 
 
-dir_path=r"../AllConfig/all_data/data/test"
+dir_path=r"../AllData/test"
 import os
 all_images=os.listdir(dir_path)
 all_abs_images=[os.path.join(dir_path,item) for item in all_images]
 
 
 import cv2
-gt_dir_path=r"../AllConfig/all_data/data/test_gt"
+gt_dir_path=r"../AllData/test_gt"
 for imgname,item in zip(all_images,all_abs_images):
     img=cv2.imread(item)
     [h,w]=img.shape[1:]
