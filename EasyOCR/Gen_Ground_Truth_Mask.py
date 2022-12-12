@@ -12,8 +12,8 @@ def get_img_via_txt(txt_name):
 
 
 from Tools.EvalTool import get_mask
-from Tools.Imagebasetool import img_show1
-save_path=r"../AllData/all_data/test_gt_mask"
+from Tools.Showtool import img_show1
+save_path=r"../AllData/train_gt_mask"
 for txt_name,txt_path in zip(all_gt_names,all_gt_path):
     img=cv2.imread(get_img_via_txt(txt_name))
     [h,w]=img.shape[:2]
