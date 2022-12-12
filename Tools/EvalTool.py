@@ -146,8 +146,6 @@ def test_Detectionevaluator():
     print(P,R,F)
 
 
-
-
 def read_txt(txt_path):
     with open(txt_path,'r') as f:
         reader_lines=f.readlines()
