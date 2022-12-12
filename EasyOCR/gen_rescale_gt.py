@@ -1,6 +1,7 @@
 import easyocr
 import torchvision.transforms as transforms
 import cv2
+import time
 reader = easyocr.Reader(['en'], gpu=True,model_storage_directory=r'F:\OCR-TASK\OCR__advprotect\AllConfig\all_model')
 def get_result(result):
     points=[]
@@ -24,7 +25,7 @@ all_abs_images=[os.path.join(dir_path,item) for item in all_images]
 
 import cv2
 gt_dir_path=r"../AllData/test_resize_gt"
-temp_path=r"../AllData/temp_path"
+temp_path=r"../AllData/temp"
 
 resize_scales = [item / 10 for item in range(6, 21, 1)]  # 0.6 0.7 0.8 ... 2.0
 
@@ -41,6 +42,7 @@ for imgname,path_item in zip(all_images,all_abs_images):
         h,w=img_torch.shape[2:]
         resize_cvimg=img_tensortocv2(transforms.Resize([int(h*item),int(w*item)])(img_torch))
         cv2.imwrite(temp_save_path,resize_cvimg)
+        #time.sleep(1)
         result = reader.readtext(temp_save_path)
         res=get_result(result)#获取列表
         #目标txt路径=目标路径+图片名称_gt.txt
