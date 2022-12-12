@@ -7,7 +7,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import tqdm
-from model_DBnet.pred_single import *
+# from model_DBnet.pred_single import *
 import AllConfig.GConfig as GConfig
 from Tools.ImageIO import img_read, img_tensortocv2
 from Tools.Baseimagetool import *
@@ -16,6 +16,12 @@ from UAUP.Auxiliary import *
 from Tools.Log import logger_config
 import datetime
 from Tools.EvalTool import DetectionIoUEvaluator,read_txt
+from mmocr.utils.ocr import MMOCR
+from PIL import Image
+import numpy as np
+from torchvision import transforms
+
+to_tensor = transforms.ToTensor()
 
 
 class RepeatAdvPatch_Attack():
@@ -27,7 +33,7 @@ class RepeatAdvPatch_Attack():
                  feamapLoss=False):
 
         # load DBnet
-        self.DBmodel = load_DBmodel(GConfig.DB_device)
+        self.ocr = MMOCR(det='DB_r18', recog=None)
         # hyper-parameters
         self.eps, self.alpha, self.decay = eps, alpha, decay
 
@@ -86,11 +92,18 @@ class RepeatAdvPatch_Attack():
         return adv_image_list
 
 
-    def MultiMiddleLoss(self):
-        return 1.0
+    def MultiMiddleLoss(self,feamap1,feamap2,x):
+        loss = 0
+        for f1,f2 in zip(feamap1,feamap2):
+            loss += self.loss(f1.mean([2,3]),f1.mean([2,3]))/torch.norm(f1.mean([2,3])-f1.mean([2,3]),p=1,dim=(0,1))
 
-    def DetectionLoss(self):
-        return 2.0
+        grad = torch.autograd.grad(loss,x,retain_graph=False)
+        return grad,loss
+
+    def DetectionLoss(self,mask,x1,x):
+        loss = torch.norm(x1*mask,p=2)
+        grad = torch.autograd.grad(loss, x, retain_graph=False)
+        return grad,loss
 
     # 快捷初始化
     def inner_init_adv_patch_image(self, mask, image, hw, device):
@@ -175,7 +188,14 @@ class RepeatAdvPatch_Attack():
         db_results = []
         for img in adv_images_cuda:
             with torch.no_grad():
-                preds = self.DBmodel(img)[0]
+                img = [tensor2np(img)]
+                boxes, feamap = self.ocr.output(img,
+                                               output='./', export='./',
+                                               feaName=["neck.lateral_convs.0","neck.lateral_convs.1",
+                                                        "neck.lateral_convs.2","neck.lateral_convs.3",
+                                                        "bbox_head.binarize.7"])
+                preds = feamap[-1]
+
             db_results.append(preds)
         hw_lists = get_image_hw(adv_images)
         i = 0
@@ -213,6 +233,9 @@ class RepeatAdvPatch_Attack():
         del (resize_adv_images, adv_images, hw_s, mask_s)
 
 
+def tensor2np(img):
+    return np.array(255*img.transpose(0,1).transpose(1,2),dtype=np.uint8)
+
 if __name__ == '__main__':
     RAT = RepeatAdvPatch_Attack(data_root="../AllData/Data",
                                 savedir='../result_save/150_150', log_name='150_150.log',
@@ -221,3 +244,4 @@ if __name__ == '__main__':
                                 adv_patch_size=(1, 3, 150, 150),
                                 feamapLoss=False)
     RAT.train()
+
